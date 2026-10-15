@@ -1,6 +1,8 @@
 import { Router } from 'express'
 import { pool } from '../db.js'
 
+import { ColorRow, ImageRow, SizeRow } from '../types.js'
+
 const router = Router()
 
 router.get('/', async (_req, res) => {
@@ -35,7 +37,43 @@ router.get('/:slug', async (req, res) => {
       return res.status(404).json({ message: 'Product not found' })
     }
 
-    res.json(products[0])
+    const product = products[0]
+
+    const [colorRows] = await pool.query(
+      'SELECT id, name, hex_code FROM product_colors WHERE product_id = ? ORDER BY sort_order', [product.id]
+    )
+
+    const colors = colorRows as ColorRow[]
+
+    if (colors.length === 0) {
+      return res.json({ ...product, colors: [] })
+    }
+
+    const colorIds = colors.map((c) => c.id)
+
+    const [imageRows] = await pool.query(
+      'SELECT id, color_id, url FROM product_images WHERE color_id IN (?) ORDER BY sort_order', [colorIds]
+    )
+
+    const images = imageRows as ImageRow[]
+    
+    const [sizeRows] = await pool.query(
+      'SELECT color_id, size, is_sold_out FROM product_variants WHERE color_id IN (?)', [colorIds] 
+    )
+
+    const sizes = sizeRows as SizeRow[]
+
+    const result = {
+      ...product,
+      colors: colors.map((color) => ({
+        ...color,
+        images: images.filter((img) => img.color_id === color.id),
+        sizes: sizes.filter((s) => s.color_id === color.id),
+      })),
+    }
+
+    res.json(result)
+
   } catch (error) {
     console.error(error)
     res.status(500).json({ message: 'Error fetching product' })
